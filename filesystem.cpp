@@ -10,8 +10,12 @@ FindFiles(
     const string& Root,
     FileResultsCallback& Callback)
 {
+    error_code Error;
     fs::path RootPath{Root};
-    if (!fs::exists(RootPath) || !fs::is_directory(RootPath)) {
+    if (!fs::exists(RootPath, Error) || !fs::is_directory(RootPath, Error)) {
+        return false;
+    }
+    if (Error) {
         return false;
     }
 
@@ -24,7 +28,6 @@ FindFiles(
         vector<u8string> Files;
         auto CurrentDirectory = Items.front();
         Items.pop_front();
-        error_code Error;
         for (auto SubItem : fs::directory_iterator{CurrentDirectory, fs::directory_options::skip_permission_denied | fs::directory_options::follow_directory_symlink, Error}) {
             if (Error) {
                 // todo: print error
@@ -76,7 +79,9 @@ FindFiles(
                 }
             }
         }
-        Callback(Files, Directories);
+        if (Files.size() || Directories.size()) {
+            Callback(Files, Directories);
+        }
     }
 
     return Result;
