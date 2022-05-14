@@ -5,6 +5,8 @@
 using namespace std;
 namespace fs = std::filesystem;
 
+const auto FileChunkSize = 100;
+
 bool
 FindFiles(
     const string& Root,
@@ -77,6 +79,11 @@ FindFiles(
                     }
                     Files.push_back(LinkPath.u8string());
                 }
+            }
+            if (Files.size() >= FileChunkSize || Directories.size() >= FileChunkSize) {
+                Callback(Files, Directories);
+                Files.clear();
+                Directories.clear();
             }
         }
         if (Files.size() || Directories.size()) {
