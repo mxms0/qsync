@@ -5,7 +5,8 @@
 #include <string>
 #include <vector>
 #include <filesystem>
-#include "filesystem.h"
+#include "auth.h"
+#include "files.h"
 
 #include <msquic.hpp>
 
@@ -30,4 +31,3 @@ typedef struct _Settings {
     
     } ServerSettings;
 } QsyncSettings;
-
