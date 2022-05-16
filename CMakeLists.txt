@@ -9,11 +9,13 @@ add_subdirectory(submodules/msquic)
 target_compile_features(inc INTERFACE cxx_std_20)
 
 # Add source to this project's executable.
-add_executable (qsync "qsync.cpp" "qsync.h" "filesystem.cpp" "filesystem.h")
+add_executable (qsync "qsync.cpp" "qsync.h" "filesystem.cpp" "filesystem.h" "auth.cpp" "auth.h")
 target_link_libraries(qsync msquic)
 target_compile_features(qsync PRIVATE cxx_std_20)
 
 if (WIN32)
+    # statically link against the OpenSSL in MsQuic
+    target_link_libraries(qsync base_link OpenSSLQuic)
     target_compile_options(qsync PRIVATE /sdl /GF /Gy /WX /W4 /Zi /Zf
         $<$<CONFIG:RELEASE>:/O1 /Zo>)
     target_link_options(qsync PUBLIC /DEBUG:FULL /WX
@@ -23,4 +25,6 @@ else()
         -Wno-unknown-pragmas -Wno-multichar -Wno-missing-field-initializers
         $<$<CONFIG:DEBUG>:-g -Og>
         $<$<CONFIG:RELEASE>:-Os>)
+    # link against OpenSSL's libcrypto for auth
+    target_link_options(qsync PUBLIC -lcrypto)
 endif()
