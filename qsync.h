@@ -8,4 +8,5 @@
 
 #include <msquic.hpp>
 
+#include "auth.h"
 #include "files.h"
