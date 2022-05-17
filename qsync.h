@@ -8,5 +8,8 @@
 
 #include <msquic.hpp>
 
+#define QSYNC_ALPN "qsync"
+
 #include "auth.h"
 #include "files.h"
+#include "server.h"
