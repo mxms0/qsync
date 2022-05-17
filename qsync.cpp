@@ -2,6 +2,9 @@
 
 using namespace std;
 
+MsQuicApi Api;
+const MsQuicApi* MsQuic;
+
 void ParseArguments(QsyncSettings &Settings, int argc, char **argv) {
     UNREFERENCED_PARAMETER(Settings);
     UNREFERENCED_PARAMETER(argc);
@@ -31,8 +34,8 @@ int main(
     QsyncSettings Settings = { };
     ParseArguments(Settings, argc, argv);
     
-    const QUIC_API_TABLE *MsQuicApi = nullptr;
-    MASSERT(MsQuicOpen2(&MsQuicApi));
+    MASSERT(QUIC_SUCCEEDED(Api.GetInitStatus()));
+    MsQuic = &Api;
     
     if (argc == 2) {
         vector<string> Files;
