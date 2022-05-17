@@ -2,6 +2,12 @@
 
 using namespace std;
 
+void ParseArguments(QsyncSettings &Settings, int argc, char **argv) {
+    UNREFERENCED_PARAMETER(Settings);
+    UNREFERENCED_PARAMETER(argc);
+    UNREFERENCED_PARAMETER(argv);
+}
+
 void PrintFilesAndDirs(
     const vector<u8string>& Files,
     const vector<u8string>& Dirs)
@@ -20,10 +26,14 @@ int main(
     int argc,
     char** argv)
 {
-    UNREFERENCED_PARAMETER(argc);
-    UNREFERENCED_PARAMETER(argv);
     printf("Hello world!\n");
 
+    QsyncSettings Settings = { };
+    ParseArguments(Settings, argc, argv);
+    
+    const QUIC_API_TABLE *MsQuicApi = nullptr;
+    MASSERT(MsQuicOpen2(&MsQuicApi));
+    
     if (argc == 2) {
         vector<string> Files;
         vector<string> Dirs;
