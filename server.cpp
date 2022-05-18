@@ -15,14 +15,12 @@ QsyncServer::QsyncListenerCallback(
     auto This = (QsyncServer*)Context;
     switch (Event->Type) {
     case QUIC_LISTENER_EVENT_NEW_CONNECTION: {
-        auto Conn =
-            new MsQuicConnection(
+        This->Connection = make_unique<MsQuicConnection>(
                 Event->NEW_CONNECTION.Connection,
-                CleanUpAutoDelete,
+                CleanUpManual,
                 QsyncServerConnectionCallback,
-                nullptr); // todo - Create context class for each connection
-        This->Connections.push_back(Conn);
-        QUIC_STATUS Status = Conn->SetConfiguration(*This->Config);
+                This);
+        QUIC_STATUS Status = This->Connection->SetConfiguration(*This->Config);
         if (QUIC_FAILED(Status)) {
             cerr << "Failed to set configuration on connection: " << Status << endl;
             return QUIC_STATUS_CONNECTION_REFUSED;
@@ -41,8 +39,14 @@ QsyncServer::QsyncServerConnectionCallback(
     _In_opt_ void* Context,
     _Inout_ QUIC_CONNECTION_EVENT* Event)
 {
-    UNREFERENCED_PARAMETER(Context);
-    UNREFERENCED_PARAMETER(Event);
+    auto This = (QsyncServer*)Context;
+    switch (Event->Type) {
+    case QUIC_CONNECTION_EVENT_CONNECTED:
+        MsQuic->ListenerStop(*This->Listener);
+        break;
+    default:
+        break;
+    }
     return QUIC_STATUS_SUCCESS;
 }
 
@@ -112,4 +116,3 @@ QsyncServer::Start(
     }
     return true;
 }
-

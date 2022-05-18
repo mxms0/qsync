@@ -5,7 +5,7 @@ class QsyncServer {
 
     QUIC_CERTIFICATE_PKCS12 Pkcs12Config;
     MsQuicCredentialConfig Creds;
-    std::vector<MsQuicConnection*> Connections;
+    std::unique_ptr<MsQuicConnection> Connection;
     std::unique_ptr<uint8_t[]> Pkcs12;
     std::unique_ptr<MsQuicConfiguration> Config;
     std::unique_ptr<MsQuicListener> Listener;
