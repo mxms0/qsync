@@ -9,7 +9,7 @@ add_subdirectory(submodules/msquic)
 target_compile_features(inc INTERFACE cxx_std_20)
 
 # Add source to this project's executable.
-add_executable (qsync "qsync.cpp" "qsync.h" "files.cpp" "files.h" "auth.cpp" "auth.h")
+add_executable (qsync "qsync.cpp" "qsync.h" "files.cpp" "files.h" "auth.cpp" "auth.h" "server.cpp" "server.h")
 target_link_libraries(qsync msquic)
 target_compile_features(qsync PRIVATE cxx_std_20)
 
