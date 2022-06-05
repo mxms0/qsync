@@ -4,7 +4,6 @@
 //
 use openssl::asn1::Asn1Time;
 use openssl::bn;
-use openssl::error::ErrorStack;
 use openssl::nid::Nid;
 use openssl::pkcs12::Pkcs12;
 use openssl::pkey::{PKey, Private};
@@ -20,45 +19,51 @@ use std::time::{SystemTime, UNIX_EPOCH, Duration};
 const PBKDF_ITERATIONS:usize = 15000;
 const ED448_KEYLEN:usize = 57;
 const SIGNING_SALT_LENGTH:usize = 64;
+const CERT_VALIDITY_DAYS:u32 = 366;
+const FIVE_MINUTES:Duration = Duration::from_secs(300);
 
-fn generate_signing_key(password: &str, salt: &[u8]) -> Result<PKey<Private>, ErrorStack> {
+fn generate_signing_key(password: &str, salt: &[u8]) -> Result<PKey<Private>, ()> {
     let mut signing_bytes: [u8; ED448_KEYLEN] = [0; ED448_KEYLEN];
-    match pbkdf2_hmac(password.as_bytes(), salt, PBKDF_ITERATIONS, MessageDigest::sha512(), &mut signing_bytes) {
-        Err(why) => { return Err(why); }
-        Ok(_) => {}
+    if let Err(why) = pbkdf2_hmac(password.as_bytes(), salt, PBKDF_ITERATIONS, MessageDigest::sha512(), &mut signing_bytes) {
+        println!("PBKDF2 failed: {}", why);
+        return Err(());
     }
 
     match PKey::private_key_from_raw_bytes(&signing_bytes, Id::ED448) {
-        Err(why) => Err(why),
+        Err(why) => {
+            println!("Failed to create signing key: {}", why);
+            Err(())
+        },
         Ok(key) => Ok(key)
     }
 }
 
-fn check_cert_name(actual_name: &X509NameRef, expected_name: &str, log_name: &str) -> bool {
-    let mut checked = false;
-    let mut itr_count = 0;
-    for entry in actual_name.entries() {
-        if itr_count == 0 {
-            match entry.data().as_slice().cmp(expected_name.as_bytes()) {
-                Ordering::Equal => {
-                    checked = true;
-                }
-                _ => {
-                    println!("{} name doesn't match! {:?} vs {}", log_name, entry.data(), expected_name);
-                    return false;
-                }
+fn check_cert_name(actual_name: &X509NameRef, expected_name: &str, log_name: &str) -> Result<(), bool> {
+    let mut entries = actual_name.entries();
+    let checked;
+    if let Some(entry) = entries.next() {
+        match entry.data().as_slice().cmp(expected_name.as_bytes()) {
+            Ordering::Equal => {
+                checked = true;
             }
-            itr_count += 1;
-        } else {
-            println!("Multiple entries in {} name!", log_name);
-            return false;
+            _ => {
+                println!("{} name doesn't match! {:?} vs {}", log_name, entry.data(), expected_name);
+                return Err(false);
+            }
         }
+    } else {
+        println!("No {} name on the certificate!", log_name);
+        return Err(false);
+    }
+    if let Some(_) = entries.next() {
+        println!("Multiple entries in {} name!", log_name);
+        return Err(false);
     }
     if !checked {
         println!("No {} name on the certificate!", log_name);
-        return false;
+        return Err(false);
     }
-    return true;
+    Ok(())
 }
 
     /// Generates a PKCS12 with a ED448 certificate and private key
@@ -118,7 +123,7 @@ pub fn generate_auth_certificate(password: &str, cert_name: &str) -> Result<Vec<
         return Err(false);
     }
 
-    let not_after = match Asn1Time::days_from_now(366) {
+    let not_after = match Asn1Time::days_from_now(CERT_VALIDITY_DAYS) {
         Err(err) => {
             println!("Failed to create NotAfter time: {}", err);
             return Err(false);
@@ -132,7 +137,7 @@ pub fn generate_auth_certificate(password: &str, cert_name: &str) -> Result<Vec<
     }
 
     let now = SystemTime::now();
-    let five_minutes_ago = match now.checked_sub(Duration::from_secs(300)) {
+    let five_minutes_ago = match now.checked_sub(FIVE_MINUTES) {
         None => {
             println!("Failed to subtract 5 minutes from current time");
             return Err(false);
@@ -202,10 +207,7 @@ pub fn generate_auth_certificate(password: &str, cert_name: &str) -> Result<Vec<
     }
 
     let signing_key = match generate_signing_key(password, &salt_bytes) {
-        Err(why) => {
-            println!("Failed to generate signing key: {}", why);
-            return Err(false);
-        }
+        Err(_) => return Err(false),
         Ok(key) => key
     };
 
@@ -272,10 +274,7 @@ pub fn verify_auth_certificate(password: &str, cert_name: &str, cert: &X509) -> 
     };
 
     let signing_key = match generate_signing_key(password, &salt) {
-        Err(why) => {
-            println!("Failed to generate signing key: {}", why);
-            return Err(false);
-        }
+        Err(_) => return Err(false),
         Ok(key) => key
     };
 
@@ -316,10 +315,8 @@ pub fn verify_auth_certificate(password: &str, cert_name: &str, cert: &X509) -> 
 
     }
 
-    if !check_cert_name(cert.issuer_name(), cert_name, "Issuer") ||
-        !check_cert_name(cert.subject_name(), cert_name, "Subject") {
-        return Err(false);
-    }
+    check_cert_name(cert.issuer_name(), cert_name, "Issuer")?;
+    check_cert_name(cert.subject_name(), cert_name, "Subject")?;
 
     match cert.verify(&signing_key) {
         Err(why) => {
