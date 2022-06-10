@@ -257,43 +257,6 @@ pub fn generate_auth_certificate(password: &str, cert_name: &str) -> Result<Vec<
 }
 
 pub fn verify_auth_certificate(password: &str, cert_name: &str, cert: &X509) -> Result<(), bool> {
-    let serial_number = cert.serial_number();
-
-    let serial_number = match serial_number.to_bn() {
-        Err(why) => {
-            println!("Failed to convert ASN SerialNumber to BIGNUM Salt: {}", why);
-            return Err(false);
-        }
-        Ok(sn) => sn,
-    };
-
-    if serial_number.num_bytes() > SIGNING_SALT_LENGTH as i32 {
-        println!(
-            "Serial number is not correct size! {} vs {}",
-            serial_number.num_bytes(),
-            SIGNING_SALT_LENGTH
-        );
-        return Err(false);
-    }
-
-    if serial_number.num_bits() < 64 {
-        println!("Serial number is less than 64 bits in length!");
-        return Err(false);
-    }
-
-    let salt = match serial_number.to_vec_padded(SIGNING_SALT_LENGTH as i32) {
-        Err(why) => {
-            println!("BIGNUM conversion to binary failed: {}", why);
-            return Err(false);
-        }
-        Ok(sn) => sn,
-    };
-
-    let signing_key = match generate_signing_key(password, &salt) {
-        Err(_) => return Err(false),
-        Ok(key) => key,
-    };
-
     let now = match Asn1Time::days_from_now(0) {
         Err(why) => {
             println!("Failed to create ASN1Time: {}", why);
@@ -332,6 +295,43 @@ pub fn verify_auth_certificate(password: &str, cert_name: &str, cert: &X509) -> 
 
     check_cert_name(cert.issuer_name(), cert_name, "Issuer")?;
     check_cert_name(cert.subject_name(), cert_name, "Subject")?;
+
+    let serial_number = cert.serial_number();
+
+    let serial_number = match serial_number.to_bn() {
+        Err(why) => {
+            println!("Failed to convert ASN SerialNumber to BIGNUM Salt: {}", why);
+            return Err(false);
+        }
+        Ok(sn) => sn,
+    };
+
+    if serial_number.num_bytes() > SIGNING_SALT_LENGTH as i32 {
+        println!(
+            "Serial number is not correct size! {} vs {}",
+            serial_number.num_bytes(),
+            SIGNING_SALT_LENGTH
+        );
+        return Err(false);
+    }
+
+    if serial_number.num_bits() < 64 {
+        println!("Serial number is less than 64 bits in length!");
+        return Err(false);
+    }
+
+    let salt = match serial_number.to_vec_padded(SIGNING_SALT_LENGTH as i32) {
+        Err(why) => {
+            println!("BIGNUM conversion to binary failed: {}", why);
+            return Err(false);
+        }
+        Ok(sn) => sn,
+    };
+
+    let signing_key = match generate_signing_key(password, &salt) {
+        Err(_) => return Err(false),
+        Ok(key) => key,
+    };
 
     match cert.verify(&signing_key) {
         Err(why) => {
