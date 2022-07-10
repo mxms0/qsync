@@ -1,5 +1,6 @@
-pub mod files;
 pub mod auth;
+pub mod deltas;
+pub mod files;
 
 use std::path::Path;
 
