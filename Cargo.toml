@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
+clap = { version = "3.2.8", features = ["derive"] }
