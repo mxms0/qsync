@@ -1,5 +1,6 @@
 pub mod files;
 pub mod auth;
+pub mod server;
 
 use std::path::Path;
 
