@@ -11,6 +11,7 @@
 #include "auth.h"
 #include "files.h"
 #include "server.h"
+#include "client.h"
 
 #define QSYNC_ALPN "qsync"
 
@@ -18,7 +19,7 @@
  #define UNREFERENCED_PARAMETER(x) (void)x
 #endif
 
-#define MASSERT(x) do { if (!(x)) { printf("Assert((%s) != true)", #x); } } while (0);
+#define MASSERT(x) do { if (!(x)) { printf("Assert((%s) != true)\n", #x); } } while (0);
 
 enum QsyncPerspective {
     Client = 0,
