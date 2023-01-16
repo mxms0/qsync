@@ -44,6 +44,43 @@ QsyncServer::QsyncServerConnectionCallback(
     case QUIC_CONNECTION_EVENT_CONNECTED:
         MsQuic->ListenerStop(*This->Listener);
         break;
+    case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
+        if (!QcVerifyCertificate(This->CertPw, Event->PEER_CERTIFICATE_RECEIVED.Certificate)) {
+            return QUIC_STATUS_BAD_CERTIFICATE;
+        }
+        break;
+    case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED:
+        This->ControlStream = make_unique<MsQuicStream>(
+            Event->PEER_STREAM_STARTED.Stream,
+            CleanUpManual,
+            QSyncServerControlStreamCallback,
+            This);
+        break;
+    default:
+        break;
+    }
+    return QUIC_STATUS_SUCCESS;
+}
+
+
+QUIC_STATUS
+QsyncServer::QSyncServerControlStreamCallback(
+    _In_ MsQuicStream* /*Stream*/,
+    _In_opt_ void* Context,
+    _Inout_ QUIC_STREAM_EVENT* Event)
+{
+    auto This = (QsyncServer*)Context;
+    switch (Event->Type) {
+    case QUIC_STREAM_EVENT_RECEIVE:
+        for (uint32_t BufIdx = 0; BufIdx < Event->RECEIVE.BufferCount; BufIdx++) {
+            Event->RECEIVE.Buffers[BufIdx].Buffer;
+        }
+        break;
+    case QUIC_STREAM_EVENT_SEND_COMPLETE:
+        (This);
+        break;
+    case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
+        break;
     default:
         break;
     }
@@ -83,11 +120,13 @@ QsyncServer::Start(
             QUIC_CREDENTIAL_FLAG_INDICATE_CERTIFICATE_RECEIVED
             | QUIC_CREDENTIAL_FLAG_REQUIRE_CLIENT_AUTHENTICATION
             | QUIC_CREDENTIAL_FLAG_DEFER_CERTIFICATE_VALIDATION;
+        this->CertPw = Password;
     }
     Creds.Type = QUIC_CREDENTIAL_TYPE_CERTIFICATE_PKCS12;
 
     MsQuicSettings Settings;
-    Settings.SetPeerBidiStreamCount(100);
+    Settings.SetPeerBidiStreamCount(1);
+    Settings.SetDisconnectTimeoutMs(10000);
 
     Config = make_unique<MsQuicConfiguration>(*Reg, Alpn, Settings, Creds);
     if (!Config->IsValid()) {
