@@ -2,3 +2,7 @@
 	path = submodules/msquic
 	url = https://github.com/microsoft/msquic.git
 	branch = main
+[submodule "submodules/capnproto"]
+	path = submodules/capnproto
+	url = https://github.com/capnproto/capnproto.git
+	branch = release-0.10.3

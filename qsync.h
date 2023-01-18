@@ -8,6 +8,8 @@
 
 #include <msquic.hpp>
 
+#include "fileinfo.capnp.h"
+
 #include "auth.h"
 #include "files.h"
 #include "server.h"
