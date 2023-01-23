@@ -1,7 +1,7 @@
+using SerializedFileInfo = std::vector<uint8_t>;
 
 typedef void FileResultsCallback(
-    const std::vector<std::filesystem::path>& Files,
-    const std::vector<std::filesystem::path>& Directories);
+    const std::vector<SerializedFileInfo>& Files);
 
 bool
 FindFiles(

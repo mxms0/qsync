@@ -3,10 +3,12 @@
 struct FileInfo {
     size @0 :UInt64;
     modifiedTime @1 :UInt64;
-    name @2 :Text;
+    path @2 :Text;
     enum Type {
         file @0;
         dir @1;
         symlink @2;
     }
+    type @3 :Type;
+    linkPath @4 :Text;
 }
