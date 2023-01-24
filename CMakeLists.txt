@@ -12,7 +12,7 @@ add_subdirectory(submodules/capnproto)
 capnp_generate_cpp(qsyncSources qsyncHeaders fileinfo.capnp)
 
 # Add source to this project's executable.
-add_executable (qsync "qsync.cpp" "qsync.h" "files.cpp" "files.h" "auth.cpp" "auth.h" "server.cpp" "server.h" "client.cpp" "client.h" "vector_stream.cpp" "vector_stream.h" ${qsyncSources} ${qsyncHeaders})
+add_executable (qsync "qsync.cpp" "qsync.h" "files.cpp" "files.h" "auth.cpp" "auth.h" "server.cpp" "server.h" "client.cpp" "client.h" "vector_stream.h" ${qsyncSources} ${qsyncHeaders})
 target_link_libraries(qsync msquic CapnProto::capnp)
 target_include_directories(qsync PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_compile_features(qsync PRIVATE cxx_std_20)
