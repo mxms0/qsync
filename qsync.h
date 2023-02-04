@@ -8,6 +8,12 @@
 
 #include <msquic.hpp>
 
+#include <kj/array.h>
+#include <kj/common.h>
+#include <capnp/serialize-packed.h>
+#include "fileinfo.capnp.h"
+
+#include "vector_stream.h"
 #include "auth.h"
 #include "files.h"
 #include "server.h"

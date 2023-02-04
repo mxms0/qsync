@@ -12,15 +12,51 @@ void ParseArguments(QsyncSettings &Settings, int argc, char **argv) {
 }
 
 void PrintFilesAndDirs(
-    const vector<std::filesystem::path>& Files,
-    const vector<std::filesystem::path>& Dirs)
+    const kj::Vector<SerializedFileInfo>& Files)
 {
-    for (auto& File : Files) {
-        cout << (char*)(File.u8string().data()) << endl;
+    for (auto& Buf : Files) {
+        // kj::ArrayPtr<const uint8_t> Ptr((const uint8_t*)Files.data(), Files.size());
+        // kj::ArrayPtr<const capnp::word> Ptr((const capnp::word*)Buf.data(), Buf.size());
+        // kj::ArrayPtr<const capnp::word> Ptr((capnp::word*)Buf.data(), Buf.size() / sizeof (capnp::word));
+
+        // works
+        // auto Message = capnp::FlatArrayMessageReader(Buf);
+
+        // works
+        kj::ArrayPtr<const uint8_t> Ptr(Buf.data(), Buf.size());
+        auto Array = kj::ArrayInputStream(Ptr);
+        auto Message = capnp::PackedMessageReader(Array);
+
+        auto File = Message.getRoot<FileInfo>();
+        // auto File = capnp::readDataStruct<FileInfo>(Ptr);
+        if (File.getType() == FileInfo::Type::FILE) {
+            // cout << Buf.size() * sizeof(Buf.front())<< endl;
+            string_view Path(File.getPath().cStr(), File.getPath().size());
+            // cout << "Path len: " << File.getPath().size() << " File Size: " << File.getSize() << endl;
+            // cout << "Object: " << Buf.size() << " " << Path << endl;
+            cout << Path << endl;
+        }
     }
     cout << "+++++++++++++++++++++++++++" << endl;
-    for (auto& Dir : Dirs) {
-        cout << (char*)(Dir.u8string().data()) << endl;
+    for (auto& Buf : Files) {
+        // kj::ArrayPtr<const capnp::word> Ptr((capnp::word*)Buf.data(), Buf.size() / sizeof (capnp::word));
+
+        // works
+        // auto Message = capnp::FlatArrayMessageReader(Buf);
+
+        // works
+        kj::ArrayPtr<const uint8_t> Ptr(Buf.data(), Buf.size());
+        auto Array = kj::ArrayInputStream(Ptr);
+        auto Message = capnp::PackedMessageReader(Array);
+
+        // kj::ArrayPtr<const capnp::word> Ptr((const capnp::word*)Buf.data(), Buf.size()); // doesn't work
+        // auto Message = capnp::FlatArrayMessageReader(Ptr);                               // doesn't work
+        auto Dir = Message.getRoot<FileInfo>();
+        if (Dir.getType() == FileInfo::Type::DIR) {
+            // cout << Buf.size() * sizeof(Buf.front()) << endl;
+            string_view Path(Dir.getPath().cStr(), Dir.getPath().size());
+            cout << Path << endl;
+        }
     }
     cout << "---------------------------" << endl;
 }
