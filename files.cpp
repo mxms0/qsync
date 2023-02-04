@@ -44,36 +44,24 @@ DirItemToFileInfo(
     // auto bytes = capnp::writeDataStruct(Builder);
 
     // works
-    // kj::VectorOutputStream VectorStream(Message.sizeInWords() * sizeof(capnp::word));
-    // cout << VectorStream.getWriteBuffer().size();
-    // capnp::writePackedMessage(VectorStream, Message);
-    // auto bytes = VectorStream.getArray();
-    // cout << " vs. " << bytes.size() << endl;
-    // vector<uint8_t> Copy(bytes.size());
-    // memcpy(Copy.data(), bytes.begin(), bytes.size());
-    // return std::move(Copy);
-
-    // works
     SerializedFileInfo Data;
     Data.reserve(Message.sizeInWords() * sizeof(capnp::word));
     VectorStream Stream(Data);
     capnp::writePackedMessage(Stream, Message);
     return std::move(Data);
 
-    // doesn't work
+    // works
     // auto words = capnp::messageToFlatArray(Message);
-    // vector<uint64_t> Copy(words.size());
-    // memcpy(Copy.data(), words.begin(), words.size());
-    // return std::move(Copy);
+    // return std::move(words);
 }
 
-tuple<vector<SerializedFileInfo>, vector<fs::path>, bool>
+tuple<kj::Vector<SerializedFileInfo>, vector<fs::path>, bool>
 ProcessFolder(
     const fs::path& Parent)
 {
     bool Success = true;
     error_code Error;
-    vector<SerializedFileInfo> Files{};
+    kj::Vector<SerializedFileInfo> Files{};
     vector<fs::path> Directories{};
     for (auto DirItem : fs::directory_iterator{Parent, fs::directory_options::skip_permission_denied | fs::directory_options::follow_directory_symlink, Error}) {
         if (Error) {
@@ -88,14 +76,14 @@ ProcessFolder(
                 continue;
             }
             Directories.push_back(DirItem.path());
-            Files.emplace_back(DirItemToFileInfo(DirItem, FileInfo::Type::DIR));
+            Files.add(DirItemToFileInfo(DirItem, FileInfo::Type::DIR));
         } else if (DirItem.is_regular_file(Error)) {
             if (Error) {
                 // todo: print error
                 Success = false;
                 continue;
             }
-            Files.emplace_back(DirItemToFileInfo(DirItem, FileInfo::Type::FILE));
+            Files.add(DirItemToFileInfo(DirItem, FileInfo::Type::FILE));
         } else if (DirItem.is_symlink(Error)) {
             if (Error) {
                 // todo: print error
@@ -115,14 +103,14 @@ ProcessFolder(
                     continue;
                 }
                 // Do we traverse symlink directories?
-                Files.emplace_back(DirItemToFileInfo(DirItem, FileInfo::Type::SYMLINK, LinkPath));
+                Files.add(DirItemToFileInfo(DirItem, FileInfo::Type::SYMLINK, LinkPath));
             } else if (fs::is_regular_file(LinkPath, Error)) {
                 if (Error) {
                     // todo: print error
                     Success = false;
                     continue;
                 }
-                Files.emplace_back(DirItemToFileInfo(DirItem, FileInfo::Type::SYMLINK, LinkPath));
+                Files.add(DirItemToFileInfo(DirItem, FileInfo::Type::SYMLINK, LinkPath));
             }
         }
     }
@@ -149,7 +137,7 @@ FindFiles(
 
     while (!UnexploredDirs.empty()) {
         vector<fs::path> Directories;
-        vector<SerializedFileInfo> Files;
+        kj::Vector<SerializedFileInfo> Files;
         bool DirSuccess;
         auto CurrentDirectory = UnexploredDirs.front();
         UnexploredDirs.pop_front();
@@ -185,21 +173,21 @@ FindFilesParallel(
     UnexploredDirs.push_back(RootPath);
 
     while (!UnexploredDirs.empty()) {
-        vector<future<tuple<vector<SerializedFileInfo>, vector<fs::path>, bool>>> ParallelResults;
+        vector<future<tuple<kj::Vector<SerializedFileInfo>, vector<fs::path>, bool>>> ParallelResults;
         for (auto const& Dir : UnexploredDirs) {
             ParallelResults.push_back(
                 async(launch::async, ProcessFolder, Dir));
         }
 
         vector<fs::path> Directories{};
-        vector<SerializedFileInfo> Files{};
+        kj::Vector<SerializedFileInfo> Files{};
         for (auto& Result : ParallelResults) {
-            vector<SerializedFileInfo> ResultFiles;
+            kj::Vector<SerializedFileInfo> ResultFiles;
             vector<fs::path> ResultDirs;
             bool ResultSuccess;
 
             tie(ResultFiles, ResultDirs, ResultSuccess) = Result.get();
-                Files.insert(Files.end(), ResultFiles.begin(), ResultFiles.end());
+                Files.addAll(ResultFiles.begin(), ResultFiles.end());
                 Directories.insert(Directories.end(), ResultDirs.begin(), ResultDirs.end());
             if (!ResultSuccess) {
                 Success = ResultSuccess;

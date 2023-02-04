@@ -8,15 +8,15 @@ public:
     void write(const void* Buffer, size_t Size)
     {
         if (Buffer != nullptr) {
-            // std::cout << "wrote " << Size << " bytes normally\n";
+            // This is UB when `getWriteBuffer` returns non-null
             InnerVec.insert(InnerVec.end(), (uint8_t*)Buffer, (uint8_t*)Buffer + Size);
         }
     }
 
     kj::ArrayPtr<kj::byte> getWriteBuffer()
     {
-        // std::cout << "getWriteBuffer(" << BytesWritten << ") " << InnerVec.capacity() - BytesWritten <<"\n";
         return kj::ArrayPtr<kj::byte>(nullptr, 0ull); // disable this from being used by having a zero-length array
+        // return kj::ArrayPtr<kj::byte>(InnerVec.data() + InnerVec.size(), InnerVec.capacity() - InnerVec.size());
     }
 private:
     std::vector<uint8_t>& InnerVec;
