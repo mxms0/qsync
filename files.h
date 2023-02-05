@@ -6,4 +6,4 @@ typedef void FileResultsCallback(
 bool
 FindFiles(
     const std::string& Root,
-    FileResultsCallback& Callback);
+    std::function<FileResultsCallback> Callback);

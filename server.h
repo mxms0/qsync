@@ -5,13 +5,25 @@ class QsyncServer {
 
     QUIC_CERTIFICATE_PKCS12 Pkcs12Config;
     MsQuicCredentialConfig Creds;
-    std::unique_ptr<MsQuicStream> ControlStream;
-    std::unique_ptr<MsQuicConnection> Connection;
-    std::unique_ptr<uint8_t[]> Pkcs12;
-    std::unique_ptr<MsQuicConfiguration> Config;
-    std::unique_ptr<MsQuicListener> Listener;
-    std::unique_ptr<MsQuicRegistration> Reg;
     std::string CertPw;
+    std::unique_ptr<uint8_t[]> Pkcs12;
+    std::unique_ptr<MsQuicRegistration> Reg;
+    std::unique_ptr<MsQuicListener> Listener;
+    std::unique_ptr<MsQuicConfiguration> Config;
+    std::unique_ptr<MsQuicConnection> Connection;
+    std::unique_ptr<MsQuicStream> ControlStream;
+    uint32_t SkipMessageBytes;
+    union {
+        uint32_t RemainderSize;
+        uint8_t RemainderSizeBytes[4];
+        QUIC_BUFFER RemainderMessage;
+    };
+    uint32_t RemainderFilled;
+    enum PartialData : uint8_t {
+        NoPartialData = 0,
+        PartialSize = 1,
+        PartialMessage = 2,
+    } PartialData;
 
 public:
     QsyncServer() = default;

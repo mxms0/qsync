@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <functional>
 
 #include <msquic.hpp>
 

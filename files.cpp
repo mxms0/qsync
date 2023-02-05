@@ -120,7 +120,7 @@ ProcessFolder(
 bool
 FindFiles(
     const string& Root,
-    FileResultsCallback& Callback)
+    std::function<FileResultsCallback> Callback)
 {
     error_code Error;
     fs::path RootPath{Root};

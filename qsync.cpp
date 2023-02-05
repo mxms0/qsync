@@ -29,36 +29,36 @@ void PrintFilesAndDirs(
 
         auto File = Message.getRoot<FileInfo>();
         // auto File = capnp::readDataStruct<FileInfo>(Ptr);
-        if (File.getType() == FileInfo::Type::FILE) {
+        // if (File.getType() == FileInfo::Type::FILE) {
             // cout << Buf.size() * sizeof(Buf.front())<< endl;
             string_view Path(File.getPath().cStr(), File.getPath().size());
             // cout << "Path len: " << File.getPath().size() << " File Size: " << File.getSize() << endl;
             // cout << "Object: " << Buf.size() << " " << Path << endl;
             cout << Path << endl;
-        }
+        // }
     }
-    cout << "+++++++++++++++++++++++++++" << endl;
-    for (auto& Buf : Files) {
+    // cout << "+++++++++++++++++++++++++++" << endl;
+    // for (auto& Buf : Files) {
         // kj::ArrayPtr<const capnp::word> Ptr((capnp::word*)Buf.data(), Buf.size() / sizeof (capnp::word));
 
         // works
         // auto Message = capnp::FlatArrayMessageReader(Buf);
 
         // works
-        kj::ArrayPtr<const uint8_t> Ptr(Buf.data(), Buf.size());
-        auto Array = kj::ArrayInputStream(Ptr);
-        auto Message = capnp::PackedMessageReader(Array);
+        // kj::ArrayPtr<const uint8_t> Ptr(Buf.data(), Buf.size());
+        // auto Array = kj::ArrayInputStream(Ptr);
+        // auto Message = capnp::PackedMessageReader(Array);
 
         // kj::ArrayPtr<const capnp::word> Ptr((const capnp::word*)Buf.data(), Buf.size()); // doesn't work
         // auto Message = capnp::FlatArrayMessageReader(Ptr);                               // doesn't work
-        auto Dir = Message.getRoot<FileInfo>();
-        if (Dir.getType() == FileInfo::Type::DIR) {
+        // auto Dir = Message.getRoot<FileInfo>();
+        // if (Dir.getType() == FileInfo::Type::DIR) {
             // cout << Buf.size() * sizeof(Buf.front()) << endl;
-            string_view Path(Dir.getPath().cStr(), Dir.getPath().size());
-            cout << Path << endl;
-        }
-    }
-    cout << "---------------------------" << endl;
+            // string_view Path(Dir.getPath().cStr(), Dir.getPath().size());
+            // cout << Path << endl;
+        // }
+    // }
+    // cout << "---------------------------" << endl;
 }
 
 int main(
@@ -104,6 +104,15 @@ int main(
             uint16_t Port = (uint16_t)atol(argv[3]);
             Client = make_unique<QsyncClient>();
             Client->Start(argv[2], Port, "", argv[4]);
+        } else if (*argv[1] == 's') {
+            // qsync s port_number password path
+        }
+    } else if (argc == 6) {
+        if (*argv[1] == 'c') {
+            // qsync c addr port_number password path
+            uint16_t Port = (uint16_t)atol(argv[3]);
+            Client = make_unique<QsyncClient>();
+            Client->Start(argv[2], Port, argv[5], argv[4]);
         }
     }
     do {
