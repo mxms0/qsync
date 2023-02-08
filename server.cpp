@@ -143,6 +143,8 @@ QsyncServer::QSyncServerControlStreamCallback(
                         cout << "Not enough data received for size..." << Event->RECEIVE.TotalBufferLength - i << " vs " << sizeof(MessageSize) << endl;
                         return QUIC_STATUS_SUCCESS;
                     }
+                    cout << "Continuing to read size in next buffer..." << endl;
+                    break;
                 }
                 memcpy(&MessageSize, CurrentBuffer->Buffer + i, sizeof(MessageSize));
                 i += sizeof(MessageSize);
@@ -158,9 +160,8 @@ QsyncServer::QSyncServerControlStreamCallback(
                         // TODO: indicate transfer error
                         if (Event->RECEIVE.TotalBufferLength - i < MessageSize) {
                             return QUIC_STATUS_SUCCESS;
-                        } else {
-                            break;
                         }
+                        break;
                     }
                     This->RemainderFilled = CurrentBuffer->Length - i;
                     memcpy(This->RemainderMessage.Buffer, CurrentBuffer->Buffer + i, CurrentBuffer->Length - i);
@@ -169,6 +170,8 @@ QsyncServer::QSyncServerControlStreamCallback(
                         cout << "Not enough data received for message..." << Event->RECEIVE.TotalBufferLength - i << " vs " << MessageSize << endl;
                         return QUIC_STATUS_SUCCESS;
                     }
+                    cout << "Continuing to read message in next buffer" << endl;
+                    break;
                 }
 
                 PrintFilePath(CurrentBuffer->Buffer + i, MessageSize);
