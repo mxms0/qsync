@@ -10,9 +10,9 @@ const auto FileChunkSize = 100;
 
 SerializedFileInfo
 DirItemToFileInfo(
-    fs::directory_entry DirItem,
-    FileInfo::Type Type,
-    fs::path LinkPath = "")
+    const fs::directory_entry& DirItem,
+    const FileInfo::Type Type,
+    const fs::path LinkPath = "")
 {
     capnp::MallocMessageBuilder Message;
     error_code Error;
@@ -31,12 +31,12 @@ DirItemToFileInfo(
     }
     Builder.setModifiedTime(
         chrono::file_clock::to_utc(FileTime).time_since_epoch().count());
-    auto Path = DirItem.path().u8string();
+    auto Path = DirItem.path().relative_path().generic_u8string();
     Builder.setPath((const char*)Path.data());
     // Builder.initPath((unsigned int)Path.size());                         // doesn't work
     // memcpy((char*)Builder.getPath().cStr(), Path.c_str(), Path.size());  // doesn't work
     if (Type == FileInfo::Type::SYMLINK && LinkPath != "") {
-        auto LinkPathStr = LinkPath.u8string();
+        auto LinkPathStr = LinkPath.generic_u8string();
         Builder.setLinkPath(LinkPathStr);
         // Builder.initLinkPath((unsigned int)LinkPathStr.size());                                  // doesn't work
         // memcpy((char*)Builder.getLinkPath().cStr(), LinkPathStr.c_str(), LinkPathStr.size());    // doesn't work
