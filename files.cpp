@@ -10,6 +10,7 @@ const auto FileChunkSize = 100;
 
 SerializedFileInfo
 DirItemToFileInfo(
+    const fs::path& Root,
     const fs::directory_entry& DirItem,
     const FileInfo::Type Type,
     const fs::path LinkPath = "")
@@ -31,7 +32,7 @@ DirItemToFileInfo(
     }
     Builder.setModifiedTime(
         chrono::file_clock::to_utc(FileTime).time_since_epoch().count());
-    auto Path = DirItem.path().relative_path().generic_u8string();
+    auto Path = DirItem.path().lexically_relative(Root).generic_u8string();
     Builder.setPath((const char*)Path.data());
     // Builder.initPath((unsigned int)Path.size());                         // doesn't work
     // memcpy((char*)Builder.getPath().cStr(), Path.c_str(), Path.size());  // doesn't work
@@ -57,6 +58,7 @@ DirItemToFileInfo(
 
 tuple<kj::Vector<SerializedFileInfo>, vector<fs::path>, bool>
 ProcessFolder(
+    const fs::path& Root,
     const fs::path& Parent)
 {
     bool Success = true;
@@ -76,14 +78,14 @@ ProcessFolder(
                 continue;
             }
             Directories.push_back(DirItem.path());
-            Files.add(DirItemToFileInfo(DirItem, FileInfo::Type::DIR));
+            Files.add(DirItemToFileInfo(Root, DirItem, FileInfo::Type::DIR));
         } else if (DirItem.is_regular_file(Error)) {
             if (Error) {
                 // todo: print error
                 Success = false;
                 continue;
             }
-            Files.add(DirItemToFileInfo(DirItem, FileInfo::Type::FILE));
+            Files.add(DirItemToFileInfo(Root, DirItem, FileInfo::Type::FILE));
         } else if (DirItem.is_symlink(Error)) {
             if (Error) {
                 // todo: print error
@@ -103,14 +105,14 @@ ProcessFolder(
                     continue;
                 }
                 // Do we traverse symlink directories?
-                Files.add(DirItemToFileInfo(DirItem, FileInfo::Type::SYMLINK, LinkPath));
+                Files.add(DirItemToFileInfo(Root, DirItem, FileInfo::Type::SYMLINK, LinkPath));
             } else if (fs::is_regular_file(LinkPath, Error)) {
                 if (Error) {
                     // todo: print error
                     Success = false;
                     continue;
                 }
-                Files.add(DirItemToFileInfo(DirItem, FileInfo::Type::SYMLINK, LinkPath));
+                Files.add(DirItemToFileInfo(Root, DirItem, FileInfo::Type::SYMLINK, LinkPath));
             }
         }
     }
@@ -125,15 +127,25 @@ FindFiles(
     error_code Error;
     fs::path RootPath{Root};
     if (!fs::exists(RootPath, Error) || !fs::is_directory(RootPath, Error)) {
+        cerr << "Path doesn't exist or isn't a directory" << endl;
         return false;
     }
     if (Error) {
         return false;
     }
+    fs::path CanonicalRoot = fs::canonical(RootPath, Error);
+    if (Error) {
+        cerr << "Could not make canonical path for " << RootPath << endl;
+        return false;
+    }
+    if (!RootPath.has_stem()) {
+        // Add trailing slash back.
+        CanonicalRoot /= "";
+    }
 
     bool Result = true;
     deque<fs::path> UnexploredDirs{};
-    UnexploredDirs.push_back(RootPath);
+    UnexploredDirs.push_back(CanonicalRoot);
 
     while (!UnexploredDirs.empty()) {
         vector<fs::path> Directories;
@@ -141,7 +153,7 @@ FindFiles(
         bool DirSuccess;
         auto CurrentDirectory = UnexploredDirs.front();
         UnexploredDirs.pop_front();
-        std::tie(Files, Directories, DirSuccess) = ProcessFolder(CurrentDirectory);
+        std::tie(Files, Directories, DirSuccess) = ProcessFolder(CanonicalRoot.parent_path(), CurrentDirectory);
         if (Files.size()) {
             Callback(Files);
         }
@@ -162,21 +174,31 @@ FindFilesParallel(
     error_code Error;
     fs::path RootPath{Root};
     if (!fs::exists(RootPath, Error) || !fs::is_directory(RootPath, Error)) {
+        cerr << "Path doesn't exist or isn't a directory" << endl;
         return false;
     }
     if (Error) {
         return false;
     }
+    fs::path CanonicalRoot = fs::canonical(RootPath, Error);
+    if (Error) {
+        cerr << "Could not make canonical path for " << RootPath << endl;
+        return false;
+    }
+    if (!RootPath.has_stem()) {
+        // Add trailing slash back.
+        CanonicalRoot /= "";
+    }
 
     bool Success = true;
     vector<fs::path> UnexploredDirs{};
-    UnexploredDirs.push_back(RootPath);
+    UnexploredDirs.push_back(CanonicalRoot);
 
     while (!UnexploredDirs.empty()) {
         vector<future<tuple<kj::Vector<SerializedFileInfo>, vector<fs::path>, bool>>> ParallelResults;
         for (auto const& Dir : UnexploredDirs) {
             ParallelResults.push_back(
-                async(launch::async, ProcessFolder, Dir));
+                async(launch::async, ProcessFolder, CanonicalRoot.parent_path(), Dir));
         }
 
         vector<fs::path> Directories{};
