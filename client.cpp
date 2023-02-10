@@ -3,6 +3,7 @@
 using namespace std;
 
 const MsQuicAlpn Alpn(QSYNC_ALPN);
+const uint16_t CONTROL_STREAM_PRIORITY = 0x8000;
 
 
 QUIC_STATUS
@@ -15,9 +16,14 @@ QsyncClient::QSyncClientControlStreamCallback(
     (This);
     switch (Event->Type) {
     case QUIC_STREAM_EVENT_START_COMPLETE:
-        cout << "Stream opened!" << endl;
+        if (QUIC_FAILED(Event->START_COMPLETE.Status)) {
+            cerr << "Stream Start failed! " << std::hex << Event->START_COMPLETE.Status << endl;
+        } else {
+            cout << "Stream opened! " << endl;
+        }
         break;
     case QUIC_STREAM_EVENT_SEND_COMPLETE:
+        free(Event->SEND_COMPLETE.ClientContext);
         break;
     case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
         break;
@@ -29,16 +35,13 @@ QsyncClient::QSyncClientControlStreamCallback(
 
 QUIC_STATUS
 QsyncClient::QsyncClientConnectionCallback(
-    _In_ MsQuicConnection* Connection,
+    _In_ MsQuicConnection* /*Connection*/,
     _In_opt_ void* Context,
     _Inout_ QUIC_CONNECTION_EVENT* Event)
 {
     QsyncClient* This = (QsyncClient*)Context;
     switch (Event->Type) {
     case QUIC_CONNECTION_EVENT_CONNECTED:
-        This->ControlStream = make_unique<MsQuicStream>(*Connection, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpManual, QSyncClientControlStreamCallback, This);
-        This->ControlStream->Start(
-            QUIC_STREAM_START_FLAG_FAIL_BLOCKED | QUIC_STREAM_START_FLAG_IMMEDIATE | QUIC_STREAM_START_FLAG_SHUTDOWN_ON_FAIL);
         cout << "Connected!" << endl;
         break;
     case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
@@ -121,11 +124,55 @@ QsyncClient::Start(
         return false;
     }
 
+    this->ControlStream = make_unique<MsQuicStream>(*Connection, QUIC_STREAM_OPEN_FLAG_NONE, CleanUpManual, QSyncClientControlStreamCallback, this);
+    if (!this->ControlStream->IsValid()) {
+        cerr << "Failed to initialize MsQuicStream: "
+            << this->ControlStream->GetInitStatus() << endl;
+        return false;
+    }
+
+    uint16_t Priority = CONTROL_STREAM_PRIORITY;
+    if (QUIC_FAILED(MsQuic->SetParam(this->ControlStream->Handle, QUIC_PARAM_STREAM_PRIORITY, sizeof(Priority), &Priority))) {
+        cerr << "Failed to set priority on ControlStream" << endl;
+        return false;
+    }
+
     QUIC_STATUS Status;
+    if (QUIC_FAILED(Status = this->ControlStream->Start(
+        QUIC_STREAM_START_FLAG_IMMEDIATE | QUIC_STREAM_START_FLAG_SHUTDOWN_ON_FAIL))) {
+        cerr << "Failed to start control stream: " << Status << endl;
+        return false;
+    }
+
     if (QUIC_FAILED(Status = Connection->Start(*Config, ServerAddr.c_str(), ServerPort))) {
         cerr << "Failed to start connection: " << Status << endl;
         return false;
     }
     SyncPath = StartPath;
+    FindFiles(
+        SyncPath,
+        [this](const kj::Vector<SerializedFileInfo>& Files) {
+            uint64_t AllocSize = sizeof(QUIC_BUFFER);
+            for (auto& File : Files) {
+                AllocSize += sizeof(uint32_t);
+                AllocSize += File.size();
+            }
+            QUIC_BUFFER* Buffer = (QUIC_BUFFER*)malloc(AllocSize);
+            Buffer->Buffer = (uint8_t*)(Buffer + 1);
+            Buffer->Length = (uint32_t)(AllocSize - sizeof(QUIC_BUFFER));
+            auto Cursor = Buffer->Buffer;
+            for (auto& File : Files) {
+                uint32_t Size = (uint32_t)File.size();
+                memcpy(Cursor, &Size, sizeof(Size));
+                Cursor += sizeof(Size);
+                memcpy(Cursor, File.data(), Size);
+                Cursor += Size;
+            }
+            QUIC_STATUS Status;
+            if (QUIC_FAILED(Status = this->ControlStream->Send(Buffer, 1, QUIC_SEND_FLAG_NONE, Buffer))) {
+                cout << "Error sending buffer: " << std::hex << Status << endl;
+                free(Buffer);
+            }
+    });
     return true;
 }

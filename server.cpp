@@ -4,6 +4,17 @@ using namespace std;
 
 const MsQuicAlpn Alpn(QSYNC_ALPN);
 
+void
+PrintFilePath(uint8_t* Buffer, uint32_t Length)
+{
+    kj::ArrayPtr<const uint8_t> Ptr(Buffer, Length);
+    auto Array = kj::ArrayInputStream(Ptr);
+    auto Message = capnp::PackedMessageReader(Array);
+    auto File = Message.getRoot<FileInfo>();
+    string_view Path(File.getPath().cStr(), File.getPath().size());
+    cout << Path << endl;
+}
+
 _IRQL_requires_max_(PASSIVE_LEVEL)
 _Function_class_(QUIC_LISTENER_CALLBACK)
 QUIC_STATUS
@@ -71,11 +82,104 @@ QsyncServer::QSyncServerControlStreamCallback(
 {
     auto This = (QsyncServer*)Context;
     switch (Event->Type) {
-    case QUIC_STREAM_EVENT_RECEIVE:
-        for (uint32_t BufIdx = 0; BufIdx < Event->RECEIVE.BufferCount; BufIdx++) {
-            Event->RECEIVE.Buffers[BufIdx].Buffer;
+    case QUIC_STREAM_EVENT_RECEIVE: {
+        for (auto BufIdx = 0u; BufIdx < Event->RECEIVE.BufferCount; BufIdx++) {
+            auto CurrentBuffer = &Event->RECEIVE.Buffers[BufIdx];
+            uint32_t i = This->SkipMessageBytes;
+            This->SkipMessageBytes = 0;
+            if (This->PartialData == PartialSize) {
+                if (CurrentBuffer->Length < sizeof(This->RemainderSize) - This->RemainderFilled) {
+                    // How did you get such a small receive???
+                    memcpy(
+                        This->RemainderSizeBytes + This->RemainderFilled,
+                        CurrentBuffer->Buffer,
+                        CurrentBuffer->Length);
+                    This->RemainderFilled += CurrentBuffer->Length;
+                    This->PartialData = PartialSize;
+                    return QUIC_STATUS_SUCCESS;
+                } else {
+                    memcpy(
+                        This->RemainderSizeBytes + This->RemainderFilled,
+                        CurrentBuffer->Buffer,
+                        sizeof(This->RemainderSize) - This->RemainderFilled);
+                    i = sizeof(This->RemainderSize) - This->RemainderFilled;
+                    PrintFilePath(CurrentBuffer->Buffer + i, This->RemainderSize);
+                    i += This->RemainderSize;
+                    This->RemainderSize = 0;
+                    This->RemainderFilled = 0;
+                    This->PartialData = NoPartialData;
+                }
+            } else if (This->PartialData == PartialMessage) {
+                if (CurrentBuffer->Length < This->RemainderMessage.Length - This->RemainderFilled) {
+                    // Another partial receive...
+                    memcpy(
+                        This->RemainderMessage.Buffer + This->RemainderFilled,
+                        CurrentBuffer->Buffer,
+                        CurrentBuffer->Length);
+                    This->RemainderFilled += CurrentBuffer->Length;
+                    This->PartialData = PartialMessage;
+                    return QUIC_STATUS_SUCCESS;
+                } else {
+                    memcpy(
+                        This->RemainderMessage.Buffer + This->RemainderFilled,
+                        CurrentBuffer->Buffer,
+                        This->RemainderMessage.Length - This->RemainderFilled);
+                    i = This->RemainderMessage.Length - This->RemainderFilled;
+                    PrintFilePath(This->RemainderMessage.Buffer, This->RemainderMessage.Length);
+                    free(This->RemainderMessage.Buffer);
+                    This->RemainderMessage.Buffer = nullptr;
+                    This->RemainderMessage.Length = 0;
+                    This->RemainderFilled = 0;
+                    This->PartialData = NoPartialData;
+                }
+            }
+            while (i < CurrentBuffer->Length) {
+                uint32_t MessageSize = 0;
+                if (CurrentBuffer->Length - i < sizeof(MessageSize)) {
+                    This->RemainderFilled = CurrentBuffer->Length - i;
+                    memcpy(&This->RemainderSize, CurrentBuffer->Buffer + i, CurrentBuffer->Length - i);
+                    This->PartialData = PartialSize;
+                    if (Event->RECEIVE.TotalBufferLength - i < sizeof(MessageSize)) {
+                        cout << "Not enough data received for size..." << Event->RECEIVE.TotalBufferLength - i << " vs " << sizeof(MessageSize) << endl;
+                        return QUIC_STATUS_SUCCESS;
+                    }
+                    cout << "Continuing to read size in next buffer..." << endl;
+                    break;
+                }
+                memcpy(&MessageSize, CurrentBuffer->Buffer + i, sizeof(MessageSize));
+                i += sizeof(MessageSize);
+
+                if (CurrentBuffer->Length - i < MessageSize) {
+                    This->RemainderMessage.Length = MessageSize;
+                    This->RemainderMessage.Buffer = (uint8_t*)malloc(This->RemainderMessage.Length);
+                    if (This->RemainderMessage.Buffer == nullptr) {
+                        // Skip this message
+                        cout << "Failed to allocate buffer for partial message!" << endl;
+                        This->RemainderMessage.Length = 0;
+                        This->SkipMessageBytes = MessageSize - (CurrentBuffer->Length - i);
+                        // TODO: indicate transfer error
+                        if (Event->RECEIVE.TotalBufferLength - i < MessageSize) {
+                            return QUIC_STATUS_SUCCESS;
+                        }
+                        break;
+                    }
+                    This->RemainderFilled = CurrentBuffer->Length - i;
+                    memcpy(This->RemainderMessage.Buffer, CurrentBuffer->Buffer + i, CurrentBuffer->Length - i);
+                    This->PartialData = PartialMessage;
+                    if (Event->RECEIVE.TotalBufferLength - i < MessageSize) {
+                        cout << "Not enough data received for message..." << Event->RECEIVE.TotalBufferLength - i << " vs " << MessageSize << endl;
+                        return QUIC_STATUS_SUCCESS;
+                    }
+                    cout << "Continuing to read message in next buffer" << endl;
+                    break;
+                }
+
+                PrintFilePath(CurrentBuffer->Buffer + i, MessageSize);
+                i += MessageSize;
+            }
         }
         break;
+    }
     case QUIC_STREAM_EVENT_SEND_COMPLETE:
         (This);
         break;
