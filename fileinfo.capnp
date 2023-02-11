@@ -11,4 +11,5 @@ struct FileInfo {
     }
     type @3 :Type;
     linkPath @4 :Text;
+    id @5 :UInt64;
 }

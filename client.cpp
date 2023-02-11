@@ -151,23 +151,20 @@ QsyncClient::Start(
     SyncPath = StartPath;
     FindFiles(
         SyncPath,
-        [this](const kj::Vector<SerializedFileInfo>& Files) {
+        [this](uint64_t Id, SerializedFileInfo&& File) {
+            (Id);
             uint64_t AllocSize = sizeof(QUIC_BUFFER);
-            for (auto& File : Files) {
                 AllocSize += sizeof(uint32_t);
                 AllocSize += File.size();
-            }
             QUIC_BUFFER* Buffer = (QUIC_BUFFER*)malloc(AllocSize);
             Buffer->Buffer = (uint8_t*)(Buffer + 1);
             Buffer->Length = (uint32_t)(AllocSize - sizeof(QUIC_BUFFER));
             auto Cursor = Buffer->Buffer;
-            for (auto& File : Files) {
                 uint32_t Size = (uint32_t)File.size();
                 memcpy(Cursor, &Size, sizeof(Size));
                 Cursor += sizeof(Size);
                 memcpy(Cursor, File.data(), Size);
                 Cursor += Size;
-            }
             QUIC_STATUS Status;
             if (QUIC_FAILED(Status = this->ControlStream->Send(Buffer, 1, QUIC_SEND_FLAG_NONE, Buffer))) {
                 cout << "Error sending buffer: " << std::hex << Status << endl;

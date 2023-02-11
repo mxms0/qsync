@@ -1,7 +1,8 @@
 using SerializedFileInfo = std::vector<uint8_t>;
 
-typedef void FileResultsCallback(
-    const kj::Vector<SerializedFileInfo>& Files);
+typedef void (FileResultsCallback)(
+    uint64_t Id,
+    SerializedFileInfo&& File);
 
 bool
 FindFiles(
