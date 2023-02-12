@@ -41,29 +41,19 @@ DirItemToFileInfo(
     Builder.setModifiedTime(
         chrono::file_clock::to_utc(FileTime).time_since_epoch().count());
     auto Path = DirItem.path().lexically_relative(Root).generic_u8string();
+    Builder.setPath((const char*)Path.data());
     auto Id = ++FileId;
     Builder.setId(Id);
-    Builder.setPath((const char*)Path.data());
-    // Builder.initPath((unsigned int)Path.size());                         // doesn't work
-    // memcpy((char*)Builder.getPath().cStr(), Path.c_str(), Path.size());  // doesn't work
     if (Type == FileInfo::Type::SYMLINK && LinkPath != "") {
         auto LinkPathStr = LinkPath.generic_u8string();
         Builder.setLinkPath(LinkPathStr);
-        // Builder.initLinkPath((unsigned int)LinkPathStr.size());                                  // doesn't work
-        // memcpy((char*)Builder.getLinkPath().cStr(), LinkPathStr.c_str(), LinkPathStr.size());    // doesn't work
     }
-    // auto bytes = capnp::writeDataStruct(Builder);
 
-    // works
     SerializedFileInfo Data;
     Data.reserve(Message.sizeInWords() * sizeof(capnp::word));
     VectorStream Stream(Data);
     capnp::writePackedMessage(Stream, Message);
     Callback(Id, std::move(Data));
-
-    // works
-    // auto words = capnp::messageToFlatArray(Message);
-    // return std::move(words);
 }
 
 template<typename F>
