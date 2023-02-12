@@ -35,7 +35,7 @@ void PrintFilesAndDirs(
             string_view Path(ParsedFile.getPath().cStr(), ParsedFile.getPath().size());
             // cout << "Path len: " << File.getPath().size() << " File Size: " << File.getSize() << endl;
             // cout << "Object: " << Buf.size() << " " << Path << endl;
-            cout << std::hex << Id << " " << Path << endl;
+            cout << std::hex << setw(16) << setfill('0') << Id << " " << Path << endl;
         // }
     // }
     // cout << "+++++++++++++++++++++++++++" << endl;

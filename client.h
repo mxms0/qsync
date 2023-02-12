@@ -10,6 +10,7 @@ class QsyncClient {
     std::unique_ptr<MsQuicConfiguration> Config;
     std::unique_ptr<MsQuicConnection> Connection;
     std::unique_ptr<MsQuicStream> ControlStream;
+    std::unordered_map<uint64_t, SerializedFileInfo> FileInfos;
     std::string CertPw;
     std::string SyncPath;
 

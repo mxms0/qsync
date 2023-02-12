@@ -6,6 +6,12 @@
 using namespace std;
 namespace fs = std::filesystem;
 
+//
+// Using this to guarantee a unique FileId for each file.
+// Assuming you have fewer than 2^64 - 1 files.
+// (Do you really need that many files?)
+//
+static uint64_t FileId = 0;
 const auto FileChunkSize = 100;
 
 template<typename F>
@@ -35,7 +41,7 @@ DirItemToFileInfo(
     Builder.setModifiedTime(
         chrono::file_clock::to_utc(FileTime).time_since_epoch().count());
     auto Path = DirItem.path().lexically_relative(Root).generic_u8string();
-    auto Id = std::hash<u8string>{}(Path);
+    auto Id = ++FileId;
     Builder.setId(Id);
     Builder.setPath((const char*)Path.data());
     // Builder.initPath((unsigned int)Path.size());                         // doesn't work

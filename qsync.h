@@ -6,6 +6,7 @@
 #include <vector>
 #include <filesystem>
 #include <functional>
+#include <unordered_map>
 
 #include <msquic.hpp>
 

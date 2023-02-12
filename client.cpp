@@ -152,21 +152,32 @@ QsyncClient::Start(
     FindFiles(
         SyncPath,
         [this](uint64_t Id, SerializedFileInfo&& File) {
-            (Id);
-            uint64_t AllocSize = sizeof(QUIC_BUFFER);
-                AllocSize += sizeof(uint32_t);
-                AllocSize += File.size();
+            if (auto Search = this->FileInfos.find(Id); Search != this->FileInfos.end()) {
+                auto Array = kj::ArrayInputStream(kj::ArrayPtr<const uint8_t>(File.data(), File.size()));
+                auto Message = capnp::PackedMessageReader(Array);
+                auto ParsedFile = Message.getRoot<FileInfo>();
+                cout << "ERROR: " << ParsedFile.getPath().cStr() << " and ";
+                auto Array2 = kj::ArrayInputStream(
+                    kj::ArrayPtr<const uint8_t>(Search->second.data(), Search->second.size()));
+                auto Message2 = capnp::PackedMessageReader(Array2);
+                auto ParsedFile2 = Message2.getRoot<FileInfo>();
+                cerr << ParsedFile2.getPath().cStr() << " hash to the same value!" << std::hex << Id << endl;
+                exit(0);
+            }
+            const auto BufferCount = 2u;
+            uint64_t AllocSize = (BufferCount * sizeof(QUIC_BUFFER)) + sizeof(uint32_t);
             QUIC_BUFFER* Buffer = (QUIC_BUFFER*)malloc(AllocSize);
-            Buffer->Buffer = (uint8_t*)(Buffer + 1);
-            Buffer->Length = (uint32_t)(AllocSize - sizeof(QUIC_BUFFER));
-            auto Cursor = Buffer->Buffer;
-                uint32_t Size = (uint32_t)File.size();
-                memcpy(Cursor, &Size, sizeof(Size));
-                Cursor += sizeof(Size);
-                memcpy(Cursor, File.data(), Size);
-                Cursor += Size;
+            Buffer->Buffer = (uint8_t*)(Buffer + BufferCount);
+            Buffer->Length = sizeof(uint32_t);
+            uint32_t Size = (uint32_t)File.size();
+            memcpy(Buffer->Buffer, &Size, sizeof(Size));
+            // Advance to the second QUIC_BUFFER
+            QUIC_BUFFER* FileBuffer = Buffer + 1;
+            FileBuffer->Buffer = File.data();
+            FileBuffer->Length = (uint32_t)File.size();
+            auto Result = this->FileInfos.emplace(Id, std::move(File));
             QUIC_STATUS Status;
-            if (QUIC_FAILED(Status = this->ControlStream->Send(Buffer, 1, QUIC_SEND_FLAG_NONE, Buffer))) {
+            if (QUIC_FAILED(Status = this->ControlStream->Send(Buffer, BufferCount, QUIC_SEND_FLAG_NONE, Buffer))) {
                 cout << "Error sending buffer: " << std::hex << Status << endl;
                 free(Buffer);
             }
