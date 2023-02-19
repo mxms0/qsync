@@ -3,8 +3,139 @@
 using namespace std;
 
 const MsQuicAlpn Alpn(QSYNC_ALPN);
-const uint16_t CONTROL_STREAM_PRIORITY = 0x8000;
+const uint16_t CONTROL_STREAM_PRIORITY = 0x7FFF;
+const uint32_t MAX_OUTSTANDING_SENDS = 4;
+const uint32_t FILE_IO_SIZE = 0xFFFF;
 
+void
+QsyncClient::DataStreamContext::FileIoWorker()
+{
+    if (EndOfFile) {
+        return;
+    }
+    QUIC_BUFFER* Buffer = (QUIC_BUFFER*)malloc(sizeof(QUIC_BUFFER) + FILE_IO_SIZE);
+    if (Buffer == nullptr) {
+        cerr << "Failed to allocate buffer for file IO!" << endl;
+    }
+    Buffer->Buffer = (uint8_t*)(Buffer + 1);
+    Buffer->Length = FILE_IO_SIZE;
+
+    FileReadStream.read((char*)Buffer->Buffer, Buffer->Length);
+    auto BytesRead = FileReadStream.gcount();
+    if (BytesRead < Buffer->Length || FileReadStream.eof()) {
+        EndOfFile = true;
+        Buffer->Length = (uint32_t)BytesRead;
+    }
+    QUIC_SEND_FLAGS Flags = EndOfFile ? QUIC_SEND_FLAG_FIN : QUIC_SEND_FLAG_NONE;
+    QUIC_STATUS Status = Stream->Send(Buffer, 1, Flags, Buffer);
+    if (QUIC_FAILED(Status)) {
+        cerr << "Data stream send failed with " << std::hex << Status << endl;
+        free(Buffer);
+        return;
+    }
+    ++OutstandingSends;
+    if (!EndOfFile && OutstandingSends < MAX_OUTSTANDING_SENDS) {
+        Client->Pool.Enqueue(&QsyncClient::DataStreamContext::FileIoWorker, this);
+    }
+}
+
+QUIC_STATUS
+QsyncClient::QSyncClientDataStreamCallback(
+    _In_ MsQuicStream* Stream,
+    _In_opt_ void* Context,
+    _Inout_ QUIC_STREAM_EVENT* Event)
+{
+    DataStreamContext* This = (DataStreamContext*)Context;
+    switch (Event->Type) {
+    case QUIC_STREAM_EVENT_START_COMPLETE:
+        if (QUIC_FAILED(Event->START_COMPLETE.Status)) {
+            cerr << "Data Stream Start failed! " << std::hex << Event->START_COMPLETE.Status << endl;
+        } else {
+            cout << "Data Stream opened! " << endl;
+        }
+        break;
+    case QUIC_STREAM_EVENT_RECEIVE: {
+        for (auto i = 0u; i < Event->RECEIVE.BufferCount; i++) {
+            const QUIC_BUFFER* Buffer = Event->RECEIVE.Buffers + i;
+            uint32_t BytesRead = 0;
+            do {
+                if (This->FileIdBytes != 0) {
+                    if (Buffer->Length - BytesRead < sizeof(This->FileId) - This->FileIdBytes) {
+                        // Tiny receive...
+                        memcpy(
+                            This->PartialFileIdBytes + This->FileIdBytes,
+                            Buffer->Buffer + BytesRead,
+                            Buffer->Length - BytesRead);
+                        This->FileIdBytes += Buffer->Length - BytesRead;
+                        BytesRead += Buffer->Length - BytesRead;
+                        continue;
+                    } else {
+                        // Completed the partial
+                        memcpy(
+                            This->PartialFileIdBytes + This->FileIdBytes,
+                            Buffer->Buffer + BytesRead,
+                            sizeof(This->FileId) - This->FileIdBytes);
+                        This->FileIdBytes = 0;
+                        BytesRead += sizeof(This->FileId) - This->FileIdBytes;
+                    }
+                } else {
+                    if (Buffer->Length - BytesRead < sizeof(This->FileId)) {
+                        // Read partial FileId
+                        memcpy(
+                            This->PartialFileIdBytes,
+                            Buffer->Buffer + BytesRead,
+                            Buffer->Length - BytesRead);
+                        This->FileIdBytes = Buffer->Length - BytesRead;
+                        BytesRead += Buffer->Length - BytesRead;
+                        continue;
+                    } else {
+                        memcpy(
+                            This->PartialFileIdBytes,
+                            Buffer->Buffer + BytesRead,
+                            sizeof(This->FileId));
+                        BytesRead += sizeof(This->FileId);
+                    }
+                }
+                auto FileItr = This->Client->FileInfos.find(This->FileId);
+                if (FileItr != This->Client->FileInfos.end()) {
+                    auto Array = kj::ArrayInputStream(kj::ArrayPtr<const uint8_t>(FileItr->second.data(), FileItr->second.size()));
+                    auto Message = capnp::PackedMessageReader(Array);
+                    auto File = Message.getRoot<FileInfo>();
+
+                    u8string_view PathView((char8_t*)File.getPath().cStr());
+                    filesystem::path SyncRoot(This->Client->SyncPath);
+                    auto Source = SyncRoot.has_stem() ? SyncRoot.parent_path() : SyncRoot;
+                    Source /= PathView;
+                    This->FileReadStream = std::fstream(Source, ios::binary | ios::in);
+                    if (!This->FileReadStream.good()) {
+                        cerr << "Failed to open file for reading " << Source << endl;
+                        Stream->Shutdown(QUIC_STATUS_NOT_FOUND);
+                        return QUIC_STATUS_SUCCESS;
+                    }
+                    This->Client->Pool.Enqueue(&QsyncClient::DataStreamContext::FileIoWorker, This);
+                    This->Client->FileInfos.erase(FileItr);
+                } else {
+                    cerr << "No File found for FileId " << This->FileId << endl;
+                }
+            } while (BytesRead < Buffer->Length);
+        }
+        break;
+    }
+    case QUIC_STREAM_EVENT_SEND_COMPLETE:
+        --This->OutstandingSends;
+        free(Event->SEND_COMPLETE.ClientContext);
+        if (!This->EndOfFile && This->OutstandingSends < MAX_OUTSTANDING_SENDS) {
+            This->Client->Pool.Enqueue(&QsyncClient::DataStreamContext::FileIoWorker, This);
+        }
+        break;
+    case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
+        delete This;
+        break;
+    default:
+        break;
+    }
+    return QUIC_STATUS_SUCCESS;
+}
 
 QUIC_STATUS
 QsyncClient::QSyncClientControlStreamCallback(
@@ -13,19 +144,69 @@ QsyncClient::QSyncClientControlStreamCallback(
     _Inout_ QUIC_STREAM_EVENT* Event)
 {
     QsyncClient* This = (QsyncClient*)Context;
-    (This);
     switch (Event->Type) {
     case QUIC_STREAM_EVENT_START_COMPLETE:
         if (QUIC_FAILED(Event->START_COMPLETE.Status)) {
-            cerr << "Stream Start failed! " << std::hex << Event->START_COMPLETE.Status << endl;
+            cerr << "Control Stream Start failed! " << std::hex << Event->START_COMPLETE.Status << endl;
         } else {
-            cout << "Stream opened! " << endl;
+            cout << "Control Stream opened! " << endl;
         }
         break;
+    case QUIC_STREAM_EVENT_RECEIVE: {
+        for (auto i = 0u; i < Event->RECEIVE.BufferCount; i++) {
+            const QUIC_BUFFER* Buffer = Event->RECEIVE.Buffers + i;
+            uint32_t BytesRead = 0;
+            do {
+                if (This->FileIdBytes != 0) {
+                    if (Buffer->Length - BytesRead < sizeof(This->PartialFileId) - This->FileIdBytes) {
+                        // Tiny receive...
+                        memcpy(
+                            This->PartialFileIdBytes + This->FileIdBytes,
+                            Buffer->Buffer + BytesRead,
+                            Buffer->Length - BytesRead);
+                        This->FileIdBytes += Buffer->Length - BytesRead;
+                        BytesRead += Buffer->Length - BytesRead;
+                        continue;
+                    } else {
+                        // Completed the partial
+                        memcpy(
+                            This->PartialFileIdBytes + This->FileIdBytes,
+                            Buffer->Buffer + BytesRead,
+                            sizeof(This->PartialFileId) - This->FileIdBytes);
+                        This->FileIdBytes = 0;
+                        BytesRead += sizeof(This->PartialFileId) - This->FileIdBytes;
+                    }
+                } else {
+                    if (Buffer->Length - BytesRead < sizeof(This->PartialFileId)) {
+                        // Read partial FileId
+                        memcpy(
+                            This->PartialFileIdBytes,
+                            Buffer->Buffer + BytesRead,
+                            Buffer->Length - BytesRead);
+                        This->FileIdBytes = Buffer->Length - BytesRead;
+                        BytesRead += Buffer->Length - BytesRead;
+                        continue;
+                    } else {
+                        memcpy(
+                            This->PartialFileIdBytes,
+                            Buffer->Buffer + BytesRead,
+                            sizeof(This->PartialFileId));
+                        BytesRead += sizeof(This->PartialFileId);
+                    }
+                }
+                auto FileItr = This->FileInfos.find(This->PartialFileId);
+                if (FileItr != This->FileInfos.end()) {
+                    This->FileInfos.erase(FileItr);
+                }
+            } while (BytesRead < Buffer->Length);
+        }
+        break;
+    }
     case QUIC_STREAM_EVENT_SEND_COMPLETE:
         free(Event->SEND_COMPLETE.ClientContext);
         break;
     case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
+        cout << "Control stream shutdown" << endl;
         break;
     default:
         break;
@@ -49,7 +230,26 @@ QsyncClient::QsyncClientConnectionCallback(
             return QUIC_STATUS_BAD_CERTIFICATE;
         }
         break;
+    case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED: {
+        DataStreamContext* StreamContext = new DataStreamContext();
+        if (StreamContext == nullptr) {
+            cerr << "Failed to allocate DataStreamContext" << endl;
+            return QUIC_STATUS_ABORTED;
+        }
+        MsQuicStream* Stream = new MsQuicStream(Event->PEER_STREAM_STARTED.Stream, CleanUpAutoDelete, QsyncClient::QSyncClientDataStreamCallback, StreamContext);
+        if (Stream == nullptr || QUIC_FAILED(Stream->InitStatus)) {
+            cerr << "Failed to create Client Data Stream" << endl;
+            return QUIC_STATUS_ABORTED;
+        }
+        StreamContext->Stream = Stream;
+        StreamContext->Client = This;
+        break;
+    }
+    case QUIC_CONNECTION_EVENT_STREAMS_AVAILABLE:
+        cout << "Allowed Streams: " << Event->STREAMS_AVAILABLE.BidirectionalCount << endl;
+        break;
     case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE:
+        cout << "Connection shutdown" << endl;
         break;
     default:
         break;
@@ -102,6 +302,7 @@ QsyncClient::Start(
     MsQuicSettings Settings;
     Settings.SetPeerBidiStreamCount(10);
     Settings.SetDisconnectTimeoutMs(10000);
+    Settings.SetSendBufferingEnabled(false);
 
     Config = make_unique<MsQuicConfiguration>(*Reg, Alpn, Settings, Creds);
     if (!Config->IsValid()) {
@@ -178,9 +379,12 @@ QsyncClient::Start(
             auto Result = this->FileInfos.emplace(Id, std::move(File));
             QUIC_STATUS Status;
             if (QUIC_FAILED(Status = this->ControlStream->Send(Buffer, BufferCount, QUIC_SEND_FLAG_NONE, Buffer))) {
-                cout << "Error sending buffer: " << std::hex << Status << endl;
+                cerr << "Error sending buffer: " << std::hex << Status << endl;
                 free(Buffer);
             }
     });
+    if (QUIC_FAILED(Status = ControlStream->Shutdown((QUIC_UINT62)QUIC_STATUS_SUCCESS, QUIC_STREAM_SHUTDOWN_FLAG_GRACEFUL))) {
+        cerr << "Failed to shutdown control stream " << std::hex << Status << endl;
+    }
     return true;
 }

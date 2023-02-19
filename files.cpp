@@ -1,6 +1,5 @@
 #include "qsync.h"
 
-#include <deque>
 #include <future>
 
 using namespace std;
@@ -13,6 +12,75 @@ namespace fs = std::filesystem;
 //
 static uint64_t FileId = 0;
 const auto FileChunkSize = 100;
+
+
+bool
+DoesFileNeedUpdate(
+    const std::filesystem::path& Destination,
+    const FileInfo::Reader& File)
+{
+    u8string_view PathView((char8_t*)File.getPath().cStr());
+    auto FullPath = Destination / PathView;
+    error_code Error;
+    auto Exists = fs::exists(FullPath, Error);
+    if (Error) {
+        // Failed to detect if the file exists, don't try to write to it.
+        return false;
+    } else if (!Exists) {
+        return true;
+    }
+    auto Status = fs::status(FullPath, Error);
+    if (Error) {
+        // Failed to query file status, don't try to write to it.
+        return false;
+    }
+
+    switch (Status.type()) {
+    case fs::file_type::regular:
+        if (File.getType() != FileInfo::Type::FILE) {
+            return false;
+        }
+        break;
+    case fs::file_type::directory:
+        if (File.getType() != FileInfo::Type::DIR) {
+            return false;
+        }
+        break;
+    case fs::file_type::symlink:
+        if (File.getType() != FileInfo::Type::SYMLINK) {
+            return false;
+        }
+        break;
+    default:
+        // Unsupported file type, don't try to write to it.
+        return false;
+    }
+
+    auto ModifiedTime = fs::last_write_time(FullPath, Error);
+    if (Error) {
+        // Failed to detect the file write time, don't try to write to it.
+        return false;
+    } 
+    chrono::utc_time<chrono::seconds> FileTime(chrono::seconds(File.getModifiedTime()));
+    if (chrono::file_clock::from_utc(FileTime) > ModifiedTime) {
+        return true;
+    }
+
+    if (File.getType() != FileInfo::Type::FILE) {
+        // If a directory already exists, don't bother checking the size
+        return false;
+    }
+
+    auto Size = fs::file_size(FullPath, Error);
+    if (Error) {
+        // Failed to read the file size, don't try to write to it.
+        return false;
+    }
+    if (Size != File.getSize()) {
+        return true;
+    }
+    return false;
+}
 
 template<typename F>
 void
@@ -39,7 +107,8 @@ DirItemToFileInfo(
         FileTime = fs::file_time_type::min();
     }
     Builder.setModifiedTime(
-        chrono::file_clock::to_utc(FileTime).time_since_epoch().count());
+        chrono::time_point_cast<chrono::seconds>(
+            chrono::file_clock::to_utc(FileTime)).time_since_epoch().count());
     auto Path = DirItem.path().lexically_relative(Root).generic_u8string();
     Builder.setPath((const char*)Path.data());
     auto Id = ++FileId;
@@ -140,6 +209,10 @@ FindFiles(
         return false;
     }
     auto LexicalRoot = !RootPath.has_stem() ? CanonicalRoot : CanonicalRoot.parent_path();
+
+    if (RootPath.has_stem()) {
+        DirItemToFileInfo(Callback, LexicalRoot, fs::directory_entry(CanonicalRoot), FileInfo::Type::DIR);
+    }
 
     bool Result = true;
     deque<fs::path> UnexploredDirs{};

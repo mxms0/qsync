@@ -1,12 +1,18 @@
 #pragma once
 
+#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <filesystem>
 #include <functional>
+#include <deque>
 #include <unordered_map>
+#include <mutex>
+#include <thread>
+#include <atomic>
+#include <fstream>
 
 #include <msquic.hpp>
 
@@ -15,6 +21,7 @@
 #include <capnp/serialize-packed.h>
 #include "fileinfo.capnp.h"
 
+#include "threadpool.h"
 #include "vector_stream.h"
 #include "auth.h"
 #include "files.h"

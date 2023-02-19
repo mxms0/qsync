@@ -1,8 +1,34 @@
 #pragma once
 
 class QsyncServer {
-    uint32_t Pkcs12Length;
+    struct DataStreamContext {
+        QsyncServer* Server;
+        MsQuicStream* Stream;
+        std::atomic_uint64_t RefCount;
+        QUIC_BUFFER Buffers[2];
+        uint32_t BufferCount;
+        SerializedFileInfo FileInfo;
+        uintmax_t NewFileSize;
+        uint64_t BytesWritten;
+        std::chrono::file_time<std::chrono::seconds> FileTime;
+        std::filesystem::path DestinationPath;
+        std::filesystem::path TempDestinationPath;
+        std::fstream FileWriteStream;
+        uint64_t SnapshotDestSize;
+        std::filesystem::file_time_type SnapshotDestModTime;
+        bool FinalReceive;
+        bool FileExists;
 
+        DataStreamContext() = default;
+        ~DataStreamContext() = default;
+
+        void FileIoWorker();
+    };
+
+    uint32_t Pkcs12Length;
+    std::filesystem::path BasePath;
+    Threadpool Pool;
+    Threadpool IoPool;
     QUIC_CERTIFICATE_PKCS12 Pkcs12Config;
     MsQuicCredentialConfig Creds;
     std::string CertPw;
@@ -26,7 +52,7 @@ class QsyncServer {
     } PartialData;
 
 public:
-    QsyncServer() = default;
+    QsyncServer() : Pool(1), IoPool(8) {};
     QsyncServer(const QsyncServer&) = delete;
     QsyncServer(QsyncServer&&) = default;
     ~QsyncServer() = default;
@@ -34,6 +60,7 @@ public:
     bool
     Start(
         uint16_t ListenPort,
+        const std::string& Root,
         const std::string& Password);
 
 private:
@@ -49,14 +76,29 @@ private:
     QsyncServerConnectionCallback(
         _In_ MsQuicConnection* /*Connection*/,
         _In_opt_ void* Context,
-        _Inout_ QUIC_CONNECTION_EVENT* Event
-        );
+        _Inout_ QUIC_CONNECTION_EVENT* Event);
 
     static
     QUIC_STATUS
     QSyncServerControlStreamCallback(
         _In_ MsQuicStream* /*Stream*/,
         _In_opt_ void* Context,
-        _Inout_ QUIC_STREAM_EVENT* Event
-    );
+        _Inout_ QUIC_STREAM_EVENT* Event);
+
+    static
+    QUIC_STATUS
+    QSyncServerDataStreamCallback(
+        _In_ MsQuicStream* /*Stream*/,
+        _In_opt_ void* Context,
+        _Inout_ QUIC_STREAM_EVENT* Event);
+
+    void
+    QSyncServerWorkerCallback(
+        _In_ const ReceivedFileInfo& Info);
+
+    void
+    AddFileToList(
+        QsyncServer* Server,
+        uint8_t* Buffer,
+        uint32_t Length);
 };

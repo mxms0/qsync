@@ -83,14 +83,14 @@ int main(
             // qsync s port_number
             uint16_t Port = (uint16_t)atol(argv[2]);
             Server = make_unique<QsyncServer>();
-            Server->Start(Port, "");
+            Server->Start(Port, "", "");
         }
     } else if (argc == 4) {
         if (*argv[1] == 's') {
             // qsync s port_number password
             uint16_t Port = (uint16_t)atol(argv[2]);
             Server = make_unique<QsyncServer>();
-            Server->Start(Port, argv[3]);
+            Server->Start(Port, "", argv[3]);
         } else if (*argv[1] == 'c') {
             // qsync c addr port_number
             uint16_t Port = (uint16_t)atol(argv[3]);
@@ -105,6 +105,9 @@ int main(
             Client->Start(argv[2], Port, "", argv[4]);
         } else if (*argv[1] == 's') {
             // qsync s port_number password path
+            uint16_t Port = (uint16_t)atol(argv[2]);
+            Server = make_unique<QsyncServer>();
+            Server->Start(Port, argv[4], argv[3]);
         }
     } else if (argc == 6) {
         if (*argv[1] == 'c') {
