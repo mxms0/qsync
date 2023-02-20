@@ -1,15 +1,91 @@
 #include "qsync.h"
 
-#include <deque>
 #include <future>
 
 using namespace std;
 namespace fs = std::filesystem;
 
+//
+// Using this to guarantee a unique FileId for each file.
+// Assuming you have fewer than 2^64 - 1 files.
+// (Do you really need that many files?)
+//
+static uint64_t FileId = 0;
 const auto FileChunkSize = 100;
 
-SerializedFileInfo
+
+bool
+DoesFileNeedUpdate(
+    const std::filesystem::path& Destination,
+    const FileInfo::Reader& File)
+{
+    u8string_view PathView((char8_t*)File.getPath().cStr());
+    auto FullPath = Destination / PathView;
+    error_code Error;
+    auto Exists = fs::exists(FullPath, Error);
+    if (Error) {
+        // Failed to detect if the file exists, don't try to write to it.
+        return false;
+    } else if (!Exists) {
+        return true;
+    }
+    auto Status = fs::status(FullPath, Error);
+    if (Error) {
+        // Failed to query file status, don't try to write to it.
+        return false;
+    }
+
+    switch (Status.type()) {
+    case fs::file_type::regular:
+        if (File.getType() != FileInfo::Type::FILE) {
+            return false;
+        }
+        break;
+    case fs::file_type::directory:
+        if (File.getType() != FileInfo::Type::DIR) {
+            return false;
+        }
+        break;
+    case fs::file_type::symlink:
+        if (File.getType() != FileInfo::Type::SYMLINK) {
+            return false;
+        }
+        break;
+    default:
+        // Unsupported file type, don't try to write to it.
+        return false;
+    }
+
+    auto ModifiedTime = fs::last_write_time(FullPath, Error);
+    if (Error) {
+        // Failed to detect the file write time, don't try to write to it.
+        return false;
+    } 
+    chrono::utc_time<chrono::seconds> FileTime(chrono::seconds(File.getModifiedTime()));
+    if (chrono::file_clock::from_utc(FileTime) > ModifiedTime) {
+        return true;
+    }
+
+    if (File.getType() != FileInfo::Type::FILE) {
+        // If a directory already exists, don't bother checking the size
+        return false;
+    }
+
+    auto Size = fs::file_size(FullPath, Error);
+    if (Error) {
+        // Failed to read the file size, don't try to write to it.
+        return false;
+    }
+    if (Size != File.getSize()) {
+        return true;
+    }
+    return false;
+}
+
+template<typename F>
+void
 DirItemToFileInfo(
+    F Callback,
     const fs::path& Root,
     const fs::directory_entry& DirItem,
     const FileInfo::Type Type,
@@ -22,7 +98,7 @@ DirItemToFileInfo(
     auto FileSize = DirItem.file_size(Error);
     if (Error) {
         // Probably should just error out here
-        return {};
+        return;
     }
     Builder.setSize(FileSize);
     auto FileTime = DirItem.last_write_time(Error);
@@ -31,39 +107,33 @@ DirItemToFileInfo(
         FileTime = fs::file_time_type::min();
     }
     Builder.setModifiedTime(
-        chrono::file_clock::to_utc(FileTime).time_since_epoch().count());
+        chrono::time_point_cast<chrono::seconds>(
+            chrono::file_clock::to_utc(FileTime)).time_since_epoch().count());
     auto Path = DirItem.path().lexically_relative(Root).generic_u8string();
     Builder.setPath((const char*)Path.data());
-    // Builder.initPath((unsigned int)Path.size());                         // doesn't work
-    // memcpy((char*)Builder.getPath().cStr(), Path.c_str(), Path.size());  // doesn't work
+    auto Id = ++FileId;
+    Builder.setId(Id);
     if (Type == FileInfo::Type::SYMLINK && LinkPath != "") {
         auto LinkPathStr = LinkPath.generic_u8string();
         Builder.setLinkPath(LinkPathStr);
-        // Builder.initLinkPath((unsigned int)LinkPathStr.size());                                  // doesn't work
-        // memcpy((char*)Builder.getLinkPath().cStr(), LinkPathStr.c_str(), LinkPathStr.size());    // doesn't work
     }
-    // auto bytes = capnp::writeDataStruct(Builder);
 
-    // works
     SerializedFileInfo Data;
     Data.reserve(Message.sizeInWords() * sizeof(capnp::word));
     VectorStream Stream(Data);
     capnp::writePackedMessage(Stream, Message);
-    return std::move(Data);
-
-    // works
-    // auto words = capnp::messageToFlatArray(Message);
-    // return std::move(words);
+    Callback(Id, std::move(Data));
 }
 
-tuple<kj::Vector<SerializedFileInfo>, vector<fs::path>, bool>
+template<typename F>
+tuple<vector<fs::path>, bool>
 ProcessFolder(
+    F Callback,
     const fs::path& Root,
     const fs::path& Parent)
 {
     bool Success = true;
     error_code Error;
-    kj::Vector<SerializedFileInfo> Files{};
     vector<fs::path> Directories{};
     for (auto DirItem : fs::directory_iterator{Parent, fs::directory_options::skip_permission_denied | fs::directory_options::follow_directory_symlink, Error}) {
         if (Error) {
@@ -78,14 +148,14 @@ ProcessFolder(
                 continue;
             }
             Directories.push_back(DirItem.path());
-            Files.add(DirItemToFileInfo(Root, DirItem, FileInfo::Type::DIR));
+            DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::DIR);
         } else if (DirItem.is_regular_file(Error)) {
             if (Error) {
                 // todo: print error
                 Success = false;
                 continue;
             }
-            Files.add(DirItemToFileInfo(Root, DirItem, FileInfo::Type::FILE));
+            DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::FILE);
         } else if (DirItem.is_symlink(Error)) {
             if (Error) {
                 // todo: print error
@@ -105,18 +175,18 @@ ProcessFolder(
                     continue;
                 }
                 // Do we traverse symlink directories?
-                Files.add(DirItemToFileInfo(Root, DirItem, FileInfo::Type::SYMLINK, LinkPath));
+                DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::SYMLINK, LinkPath);
             } else if (fs::is_regular_file(LinkPath, Error)) {
                 if (Error) {
                     // todo: print error
                     Success = false;
                     continue;
                 }
-                Files.add(DirItemToFileInfo(Root, DirItem, FileInfo::Type::SYMLINK, LinkPath));
+                DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::SYMLINK, LinkPath);
             }
         }
     }
-    return make_tuple(std::move(Files), std::move(Directories), Success);
+    return make_tuple(std::move(Directories), Success);
 }
 
 bool
@@ -138,9 +208,10 @@ FindFiles(
         cerr << "Could not make canonical path for " << RootPath << endl;
         return false;
     }
-    if (!RootPath.has_stem()) {
-        // Add trailing slash back.
-        CanonicalRoot /= "";
+    auto LexicalRoot = !RootPath.has_stem() ? CanonicalRoot : CanonicalRoot.parent_path();
+
+    if (RootPath.has_stem()) {
+        DirItemToFileInfo(Callback, LexicalRoot, fs::directory_entry(CanonicalRoot), FileInfo::Type::DIR);
     }
 
     bool Result = true;
@@ -149,14 +220,11 @@ FindFiles(
 
     while (!UnexploredDirs.empty()) {
         vector<fs::path> Directories;
-        kj::Vector<SerializedFileInfo> Files;
         bool DirSuccess;
         auto CurrentDirectory = UnexploredDirs.front();
         UnexploredDirs.pop_front();
-        std::tie(Files, Directories, DirSuccess) = ProcessFolder(CanonicalRoot.parent_path(), CurrentDirectory);
-        if (Files.size()) {
-            Callback(Files);
-        }
+        std::tie(Directories, DirSuccess) = ProcessFolder(Callback, LexicalRoot, CurrentDirectory);
+
         UnexploredDirs.insert(UnexploredDirs.end(), Directories.begin(), Directories.end());
         if (!DirSuccess) {
             Result = DirSuccess;
@@ -169,7 +237,7 @@ FindFiles(
 bool
 FindFilesParallel(
     const string& Root,
-    FileResultsCallback& Callback)
+    std::function<FileResultsCallback> Callback)
 {
     error_code Error;
     fs::path RootPath{Root};
@@ -185,38 +253,30 @@ FindFilesParallel(
         cerr << "Could not make canonical path for " << RootPath << endl;
         return false;
     }
-    if (!RootPath.has_stem()) {
-        // Add trailing slash back.
-        CanonicalRoot /= "";
-    }
+    auto LexicalRoot = !RootPath.has_stem() ? CanonicalRoot : CanonicalRoot.parent_path();
 
     bool Success = true;
     vector<fs::path> UnexploredDirs{};
     UnexploredDirs.push_back(CanonicalRoot);
 
     while (!UnexploredDirs.empty()) {
-        vector<future<tuple<kj::Vector<SerializedFileInfo>, vector<fs::path>, bool>>> ParallelResults;
+        vector<future<tuple<vector<fs::path>, bool>>> ParallelResults;
         for (auto const& Dir : UnexploredDirs) {
             ParallelResults.push_back(
-                async(launch::async, ProcessFolder, CanonicalRoot.parent_path(), Dir));
+                async(launch::async, ProcessFolder<std::function<FileResultsCallback>>, Callback, LexicalRoot, Dir));
         }
 
         vector<fs::path> Directories{};
-        kj::Vector<SerializedFileInfo> Files{};
         for (auto& Result : ParallelResults) {
-            kj::Vector<SerializedFileInfo> ResultFiles;
             vector<fs::path> ResultDirs;
             bool ResultSuccess;
 
-            tie(ResultFiles, ResultDirs, ResultSuccess) = Result.get();
-                Files.addAll(ResultFiles.begin(), ResultFiles.end());
+            tie(ResultDirs, ResultSuccess) = Result.get();
                 Directories.insert(Directories.end(), ResultDirs.begin(), ResultDirs.end());
             if (!ResultSuccess) {
                 Success = ResultSuccess;
             }
         }
-
-        Callback(Files);
         UnexploredDirs.swap(Directories);
     }
     return Success;
