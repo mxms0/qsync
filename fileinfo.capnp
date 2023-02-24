@@ -7,7 +7,8 @@ struct FileInfo {
     enum Type {
         file @0;
         dir @1;
-        symlink @2;
+        filesymlink @2;
+        dirsymlink @3;
     }
     type @3 :Type;
     linkPath @4 :Text;

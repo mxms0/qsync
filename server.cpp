@@ -148,23 +148,43 @@ QsyncServer::QSyncServerWorkerCallback(
                 return;
             }
             return;
-        } else if (File.getType() == FileInfo::Type::SYMLINK) {
+        } else if (File.getType() == FileInfo::Type::FILESYMLINK) {
             // cout << "Symlink needs updating " << DestinationPath << endl;
             if (fs::exists(DestinationPath, Error)) {
                 if (Error) {
-                    cerr << "Failed to test whether the symlink exists (success?) " << DestinationPath << " why " << Error << endl;
+                    cerr << "Failed to test whether the file symlink exists (success?) " << DestinationPath << " why " << Error << endl;
                     return;
                 }
             } else {
                 if (Error) {
-                    cerr << "Failed to test whether the symlink exists (failure?) " << DestinationPath << " why " << Error << endl;
+                    cerr << "Failed to test whether the file symlink exists (failure?) " << DestinationPath << " why " << Error << endl;
                     return;
                 }
                 u8string_view LinkDestView((char8_t*)File.getLinkPath().cStr());
                 fs::path LinkDest(LinkDestView);
                 fs::create_symlink(LinkDest, DestinationPath, Error);
                 if (Error) {
-                    cerr << "Failed to create symlink " << DestinationPath << " -> " << LinkDest << " why " << Error << endl;
+                    cerr << "Failed to create file symlink " << DestinationPath << " -> " << LinkDest << " why " << Error << endl;
+                    return;
+                }
+            }
+            return;
+        } else if (File.getType() == FileInfo::Type::DIRSYMLINK) {
+            if (fs::exists(DestinationPath, Error)) {
+                if (Error) {
+                    cerr << "Failed to test whether the dirsymlink exists (success?) " << DestinationPath << " why " << Error << endl;
+                    return;
+                }
+            } else {
+                if (Error) {
+                    cerr << "Failed to test whether the dirsymlink exists (failure?) " << DestinationPath << " why " << Error << endl;
+                    return;
+                }
+                u8string_view LinkDestView((char8_t*)File.getLinkPath().cStr());
+                fs::path LinkDest(LinkDestView);
+                fs::create_directory_symlink(LinkDest, DestinationPath, Error);
+                if (Error) {
+                    cerr << "Failed to create dirsymlink " << DestinationPath << " -> " << LinkDest << " why " << Error << endl;
                     return;
                 }
             }

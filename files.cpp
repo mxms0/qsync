@@ -46,11 +46,25 @@ DoesFileNeedUpdate(
             return false;
         }
         break;
-    case fs::file_type::symlink:
-        if (File.getType() != FileInfo::Type::SYMLINK) {
+    case fs::file_type::symlink: {
+        auto LinkPath = fs::read_symlink(FullPath, Error);
+        if (Error) {
+            // todo: print error
+            return false;
+        }
+        auto LinkStatus = fs::status(LinkPath, Error);
+        if (Error) {
+            // todo: print error
+            return false;
+        }
+        if (fs::is_directory(LinkStatus) && File.getType() != FileInfo::Type::DIRSYMLINK) {
+            return false;
+        }
+        if (fs::is_regular_file(LinkStatus) && File.getType() != FileInfo::Type::FILESYMLINK) {
             return false;
         }
         break;
+    }
     default:
         // Unsupported file type, don't try to write to it.
         return false;
@@ -113,7 +127,8 @@ DirItemToFileInfo(
     Builder.setPath((const char*)Path.data());
     auto Id = ++FileId;
     Builder.setId(Id);
-    if (Type == FileInfo::Type::SYMLINK && LinkPath != "") {
+    if ((Type == FileInfo::Type::FILESYMLINK ||
+        Type == FileInfo::Type::DIRSYMLINK) && LinkPath != "") {
         auto LinkPathStr = LinkPath.generic_u8string();
         Builder.setLinkPath(LinkPathStr);
     }
@@ -141,48 +156,35 @@ ProcessFolder(
             Success = false;
             break;
         }
-        if (DirItem.is_directory(Error)) {
-            if (Error) {
-                // todo: print error
-                Success = false;
-                continue;
-            }
+        auto ItemStatus = DirItem.status(Error);
+        if (Error) {
+            // todo: print error
+            Success = false;
+            continue;
+        }
+        if (fs::is_directory(ItemStatus)) {
             Directories.push_back(DirItem.path());
             DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::DIR);
-        } else if (DirItem.is_regular_file(Error)) {
-            if (Error) {
-                // todo: print error
-                Success = false;
-                continue;
-            }
+        } else if (fs::is_regular_file(ItemStatus)) {
             DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::FILE);
-        } else if (DirItem.is_symlink(Error)) {
-            if (Error) {
-                // todo: print error
-                Success = false;
-                continue;
-            }
+        } else if (fs::is_symlink(ItemStatus)) {
             auto LinkPath = fs::read_symlink(DirItem.path(), Error);
             if (Error) {
                 // todo: print error
                 Success = false;
                 continue;
             }
-            if (fs::is_directory(LinkPath, Error)) {
-                if (Error) {
-                    // todo: print error
-                    Success = false;
-                    continue;
-                }
+            auto LinkStatus = fs::status(LinkPath, Error);
+            if (Error) {
+                // todo: print error
+                Success = false;
+                continue;
+            }
+            if (fs::is_directory(LinkStatus)) {
                 // Do we traverse symlink directories?
-                DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::SYMLINK, LinkPath);
-            } else if (fs::is_regular_file(LinkPath, Error)) {
-                if (Error) {
-                    // todo: print error
-                    Success = false;
-                    continue;
-                }
-                DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::SYMLINK, LinkPath);
+                DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::DIRSYMLINK, LinkPath);
+            } else if (fs::is_regular_file(LinkStatus)) {
+                DirItemToFileInfo(Callback, Root, DirItem, FileInfo::Type::FILESYMLINK, LinkPath);
             }
         }
     }
